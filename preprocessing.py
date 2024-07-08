@@ -11,7 +11,6 @@ from decimal import Decimal, ROUND_HALF_UP
 
 import time
 import warnings
-from joblib import dump, load
 
 
 def get_crystals_from_file(filename: str, api_key: str) -> tuple:
