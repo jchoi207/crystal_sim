@@ -24,6 +24,7 @@ def get_crystals_from_file(filename: str, api_key: str) -> tuple:
     Returns:
         tuple:
             - crystal_list (list): A list of crystal structures.
+            - system_number (list): A list of spacegroup numbers.
             - system_list (list): A list of crystal system classifications, which can be one of the following:
                 'Triclinic', 'Trigonal', 'Orthorhombic', 'Cubic', 'Monoclinic', 'Tetragonal', 'Hexagonal'.
             - material_id_list (list): A list of tuples, where each tuple contains a material ID and its formula, e.g., [(id_1, formula_1), ... , (id_n, formula_n)].
@@ -38,12 +39,13 @@ def get_crystals_from_file(filename: str, api_key: str) -> tuple:
         )
 
     crystal_list = [crystal.structure for crystal in crystals]
+    space_group_list = [crystal.symmetry.number for crystal in crystals]
     system_list = [str(crystal.symmetry.crystal_system)
                    for crystal in crystals]
     material_id_list = [(crystal.material_id, crystal.formula_pretty)
                         for crystal in crystals]
 
-    return crystal_list, system_list, material_id_list
+    return crystal_list, space_group_list, system_list, material_id_list
 
 
 def get_cartesian_beam_directions(upper: int = 1) -> list:
@@ -127,7 +129,8 @@ def plot_patterns(dfs: list, beam_directions: list, system_list: list, material_
     count = 0
     l = 3
     fig, ax = plt.subplots(nrows=l, ncols=l, figsize=(5 * l, 5 * l))
-    fig.suptitle(f"{material_id} \n {system_list} \n Electron Diffraction Pattern")
+    fig.suptitle(f"{material_id} \n {
+                 system_list} \n Electron Diffraction Pattern")
 
     for i in range(l):
         for j in range(l):
@@ -262,7 +265,8 @@ def get_preprocessed_data(crystal_list: list, system_list: list, material_id_lis
 
         if i % 25 == 0:
             end_time = time.time()
-            print(f"_________________{i*100//length}% complete_________________")
+            print(f"_________________{
+                  i*100//length}% complete_________________")
             time_diff = end_time - start_time
             print(f"Time elapsed: {round(end_time - base_time, 3)} s")
             print(f"Time diff: {round(time_diff, 3)} s")
