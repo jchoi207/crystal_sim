@@ -11,6 +11,8 @@ from decimal import Decimal, ROUND_HALF_UP
 
 import time
 import warnings
+import os
+from joblib import dump, load
 
 
 def get_crystals_from_file(filename: str, api_key: str) -> tuple:
@@ -22,12 +24,11 @@ def get_crystals_from_file(filename: str, api_key: str) -> tuple:
         api_key (str): API key for accessing the Materials Project database.
 
     Returns:
-        tuple:
-            - crystal_list (list): A list of crystal structures.
-            - system_number (list): A list of spacegroup numbers.
-            - system_list (list): A list of crystal system classifications, which can be one of the following:
+        crystal_list (list): A list of crystal structures.
+        system_number (list): A list of spacegroup numbers.
+        system_list (list): A list of crystal system classifications, which can be one of the following:
                 'Triclinic', 'Trigonal', 'Orthorhombic', 'Cubic', 'Monoclinic', 'Tetragonal', 'Hexagonal'.
-            - material_id_list (list): A list of tuples, where each tuple contains a material ID and its formula, e.g., [(id_1, formula_1), ... , (id_n, formula_n)].
+        material_id_list (list): A list of tuples, where each tuple contains a material ID and its formula, e.g., [(id_1, formula_1), ... , (id_n, formula_n)].
     """
     with open(filename, 'r') as file:
         materials_random_order = [material_id.strip() for material_id in file]
@@ -129,8 +130,7 @@ def plot_patterns(dfs: list, beam_directions: list, system_list: list, material_
     count = 0
     l = 3
     fig, ax = plt.subplots(nrows=l, ncols=l, figsize=(5 * l, 5 * l))
-    fig.suptitle(f"{material_id} \n {
-                 system_list} \n Electron Diffraction Pattern")
+    fig.suptitle(f"{material_id} {system_list} \n Electron Diffraction Pattern")
 
     for i in range(l):
         for j in range(l):
@@ -231,13 +231,14 @@ def write_data_to_txt(filename: str, data: list) -> None:
             f.write(f"vector((0,0,0),{str(d)})\n")
 
 
-def get_preprocessed_data(crystal_list: list, system_list: list, material_id_list: list,
+def get_preprocessed_data(crystal_list: list, space_group_list: list, system_list: list, material_id_list: list,
                           beam_directions: list, plot: bool = False, vectors: bool = True) -> list:
     """
     Preprocesses crystal data, generates features and labels, and optionally plots diffraction patterns.
 
     Args:
         crystal_list (list): A list of crystal structures.
+        space_group_list (list): A list of space group numbers.
         system_list (list): A list of crystal system classifications.
         material_id_list (list): A list of tuples containing material IDs and formulas.
         beam_directions (list): A list of beam direction vectors.
@@ -245,15 +246,17 @@ def get_preprocessed_data(crystal_list: list, system_list: list, material_id_lis
         vectors (bool, optional): Whether to use vectors for features. Defaults to True.
 
     Returns:
-        tuple:
-            - features (list): A list of feature vectors for each crystal.
-            - labels_regression (list): A list of unit cell parameters for regression.
-            - labels_classification (list): A list of crystal system classifications for classification.
-            - material_id_list (list): A list of tuples containing material IDs and formulas.
+
+        features (list): A list of feature vectors for each crystal.
+        labels_regression (list): A list of unit cell parameters for regression.
+        labels_classification_space (list): A list of crystal system space groups.
+        labels_classification_system (list): A list of crystal system classifications.
+        material_id_list (list): A list of tuples containing material IDs and formulas.
     """
     features = []
     labels_regression = []
-    labels_classification = system_list
+    labels_classification_space = space_group_list
+    labels_classification_system = system_list
     times = []
     base_time = time.time()
     start_time = time.time()
@@ -265,8 +268,7 @@ def get_preprocessed_data(crystal_list: list, system_list: list, material_id_lis
 
         if i % 25 == 0:
             end_time = time.time()
-            print(f"_________________{
-                  i*100//length}% complete_________________")
+            print(f"_________________{i*100//length}% complete_________________")
             time_diff = end_time - start_time
             print(f"Time elapsed: {round(end_time - base_time, 3)} s")
             print(f"Time diff: {round(time_diff, 3)} s")
@@ -297,11 +299,77 @@ def get_preprocessed_data(crystal_list: list, system_list: list, material_id_lis
 
         if vectors and plot:
             plot_patterns(dfs, beam_directions,
-                          labels_classification[i], material_id_list[i])
+                          labels_classification_system[i], material_id_list[i])
 
     print("___________________________________")
     print(f"Time elapsed: {round(time.time() - base_time, 3)} s")
     print("100% complete")
     print("______________________________________________________________________")
 
-    return features, labels_regression, labels_classification, material_id_list
+    return features, labels_regression, labels_classification_space, labels_classification_system, material_id_list
+
+
+def save_data(features, labels_regression, labels_classification_space, labels_classification_system, material_ids, base_dir, new_dir) -> str:
+    """
+    Saves processed features, labels and material ids from previous code modules
+
+    Args:
+        features (list): list of features.
+        labels_regression (list): unit cell parameters [a,b,c,alpha,beta,gamma].
+        labels_classification_space
+        labels_classification_system (list): crystal system group.
+        materials_ids (list): material ids.
+        base_dir (str): base directory of repo.
+        new_dir (str): where the saved data should go.
+
+    Returns: 
+        str: a key path that contains the paths of all the saved files.
+
+    """
+    l = [features, labels_regression, labels_classification_space,
+         labels_classification_system, material_ids]
+
+    new_folder = os.path.join(base_dir, 'preprocessed_data', f"{new_dir}")
+    if not os.path.exists(new_folder):
+        os.makedirs(new_folder)
+
+    length = len(material_ids)
+
+    filenames = [
+        os.path.join(new_folder, f"{new_dir}_features_{length}.joblib"),
+        os.path.join(new_folder, f"{new_dir}_regression_{length}.joblib"),
+        os.path.join(new_folder, f"{new_dir}_labels_classification_space_{length}.joblib"),
+        os.path.join(new_folder, f"{new_dir}_labels_classification_system_{length}.joblib"),
+        os.path.join(new_folder, f"{new_dir}_material_ids{length}.joblib")
+    ]
+
+    for i in range(len(l)):
+        dump(l[i], filenames[i])
+
+    dump(filenames, f"{new_dir}_key_path")
+
+    print(filenames)
+    print("Path to retrieve files: {}".format(
+        os.path.abspath(f"{new_dir}_key_path")))
+
+    return os.path.abspath(f"{new_dir}_key_path")
+
+
+def load_data(filenames_path) -> list:
+    """
+    Loads the data that was saved using the save_data() function.
+
+    Args:
+        filenames_path (str): path returned by save_data.
+
+    Returns:
+        list: List containing all the loaded information.
+    """
+
+    get_file_names = load(filenames_path)
+    data_list = []
+
+    for filename in get_file_names:
+        print(f"Retrieving: {filename}")
+        data_list.append(load(filename))
+    return data_list
