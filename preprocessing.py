@@ -89,12 +89,12 @@ def retrieve_crystals_from_api(api_key: str, crystal_system: str, base_dir: str,
     }
 
     conversion_dict = {
-        'P': ['Primitive'],
+        'P': ['Primitive    '],
         'I': ['Body Centered'],
         'A': ['Face Centered'],
         'F': ['Centered on A'],
         'C': ['Centered on C'],
-        'R': ['Rhombohedral']
+        'R': ['Rhombohedral ']
     }
 
     with MPRester(api_key=api_key) as mpr:
@@ -131,36 +131,48 @@ def retrieve_crystals_from_api(api_key: str, crystal_system: str, base_dir: str,
                 file.write(f"{value}\n")
         file.close()
 
-    bravais_dict = {k: v for k, v in bravais_dict.items() if k in non_empty_keys}
+    bravais_dict = {k: v for k, v in bravais_dict.items()
+                    if k in non_empty_keys}
 
-    print(f"_________________Summary:{crystal_system} System_________________\n")
-    for bravais in non_empty_keys:
-        print(f"{bravais}: {conversion_dict[bravais][0]}")
-    
+    print(f"_________________Summary:_________________\n")
+
     for x in bravais_dict.keys():
-        sizes.append(len(bravais_dict[x]))    
-    
-    for x, y in zip(non_empty_keys, sizes):
-        print(f">> {x}: number of datapoints - {y}")
-    
-    least_datapoints = min(sizes)
-    print(f"\n>> Total number of samples: {sum(sizes)}\n")
-    print(f"\n>> Smallest number of sample points: {least_datapoints}")
+        sizes.append(len(bravais_dict[x]))
 
-    if 'min_size' in kwargs:
+    for x, y in zip(non_empty_keys, sizes):
+        print(f">> {x} {conversion_dict[x][0]}: number of crystals - {y}")
+
+    least_datapoints = min(sizes)
+    print(f">> Total number of crystals: {sum(sizes)}\n")
+    print(f">> Smallest number of crystals: {least_datapoints}")
+
+    if kwargs['min_size'] != None:
         min_size = kwargs['min_size']
-        print(f">> Overwriting least number of available sample points from {least_datapoints} to {min_size}")
+        print(f">> Overwriting the smallest number of available sample points from {least_datapoints} to {min_size}")
+        print(f">> {min_size * len(non_empty_keys)} crystals will be processed\n")
         return (
-                bravais_dict, 
-                min_size, 
-                api_key
-                )
+            bravais_dict,
+            min_size,
+            api_key
+        )
     else:
+        min_size = least_datapoints + 1
+        while min_size > least_datapoints:
+            try:
+
+                min_size = int(input(f"<< How many crystals per Bravais Lattice type would you like to process? \nThis number must necessarily be <= {least_datapoints} to ensure a balanced dataset"))
+                if min_size > least_datapoints:
+                    print(f">> Invalid input. Enter a number <= {least_datapoints}")
+            except ValueError:
+                print(">> Invalid input. Please enter a valid integer.")
+
+        print(f">> {min_size * len(non_empty_keys)} crystals will be processed\n")
+
         return (
-                bravais_dict, 
-                least_datapoints, 
-                api_key
-                )
+            bravais_dict,
+            min_size,
+            api_key
+        )
 
 
 def get_crystal_info(retrieve_crystals_tuple) -> tuple:
@@ -206,8 +218,7 @@ def get_crystal_info(retrieve_crystals_tuple) -> tuple:
                         for crystal in crystals]
         material_id_list += [(crystal.material_id, crystal.formula_pretty)
                              for crystal in crystals]
-    print(f">> Samples per bravais lattice type: {min_size}")
-    print(f">> Total samples: {min_size * len(bravais_dict.keys())}")
+
     return (
         crystal_list,
         space_group_list,
@@ -437,20 +448,24 @@ def get_preprocessed_data(get_crystal_returns: tuple, beam_directions: list, plo
     start_time = time.time()
     length = len(crystal_list)
 
+    if length < 10:
+        interval_denom = length
+    else:
+        interval_denom = length // 10
+
     for i in range(length):
         my_crystal_structure = crystal_list[i]
         struct = my_crystal_structure.as_dict()['lattice']
 
-        if i % 25 == 0:
+        if i % (interval_denom) == 0:
             end_time = time.time()
             print(f"_________________{i*100//length}% complete_________________")
             time_diff = end_time - start_time
+            print(f">> Crystal No.{i}: {material_id_list[i]} ")
             print(f">> Time elapsed: {round(end_time - base_time, 3)} s")
             print(f">> Time diff: {round(time_diff, 3)} s")
             times.append(time_diff)
             start_time = time.time()
-
-            print(f">> {i}: {material_id_list[i]} ")
 
         parameters = [round(struct[unit_parameter], 2) for unit_parameter in [
             'a', 'b', 'c', 'alpha', 'beta', 'gamma']]
@@ -477,9 +492,9 @@ def get_preprocessed_data(get_crystal_returns: tuple, beam_directions: list, plo
                           labels_classification_system[i], material_id_list[i])
 
     print("___________________________________")
-    print(f">> Time elapsed: {round(time.time() - base_time, 3)} s")
+    print(f">> Total time elapsed: {round(time.time() - base_time, 3)} s")
     print(">> 100% complete")
-    print("______________________________________________________________________")
+    print("______________________________________________________________________\n")
 
     return (
         features,
@@ -511,9 +526,9 @@ def save_data(get_preprocessed_returns, base_dir, new_dir) -> str:
     """
     features, labels_regression, labels_classification_space, labels_classification_bravais, labels_classification_system, material_id_list = get_preprocessed_returns
 
-    print(f">> Printing the first element from each array\n")
+    print(f">> Sanity Check: printing the first element from each array\n")
     for x in get_preprocessed_returns:
-        print(x[0:3])
+        print(x[0:1])
 
     inp = input("<< Would you like to save your data? [y]/[n]")
     if inp != 'y':
