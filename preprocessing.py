@@ -17,18 +17,21 @@ from joblib import dump, load
 
 def get_crystals_from_file(filename: str, api_key: str) -> tuple:
     """
-    Retrieves crystal structure properties, crystal system classifications, and material IDs from a file using the Materials Project API.
+    Retrieves crystal structure properties, crystal system classifications, and mp-ids from a file using the Materials Project API.
 
     Args:
-        filename (str): Path to the .txt file containing Material Project (MPR) material IDs, one per line.
-        api_key (str): API key for accessing the Materials Project database.
+        filename (str): Path to the .txt file containing Material Project (MPR) mp-ids, separated by line breaks.
+        api_key (str): API key.
 
     Returns:
-        crystal_list (list): A list of crystal structures.
-        system_number (list): A list of spacegroup numbers.
-        system_list (list): A list of crystal system classifications, which can be one of the following:
-                'Triclinic', 'Trigonal', 'Orthorhombic', 'Cubic', 'Monoclinic', 'Tetragonal', 'Hexagonal'.
-        material_id_list (list): A list of tuples, where each tuple contains a material ID and its formula, e.g., [(id_1, formula_1), ... , (id_n, formula_n)].
+        tuple:
+            crystal_list (list): A list of crystal structures.
+            space_group_list (list): A list of spacegroup numbers.
+            bravais_list (list): A list of Bravais Lattice types, which can be one of the following:
+                    'Simple (P)', 'Body centered (I)', 'Face centered (F)'
+            system_list (list): A list of crystal system classifications, which can be one of the following:
+                    'Triclinic', 'Trigonal', 'Orthorhombic', 'Cubic', 'Monoclinic', 'Tetragonal', 'Hexagonal'.
+            material_id_list (list): A list of tuples, where each tuple contains a material ID and its formula, e.g., [(id_1, formula_1), ... , (id_n, formula_n)].
     """
     with open(filename, 'r') as file:
         materials_random_order = [material_id.strip() for material_id in file]
@@ -36,17 +39,182 @@ def get_crystals_from_file(filename: str, api_key: str) -> tuple:
     with MPRester(api_key=api_key) as mpr:
         crystals = mpr.materials.search(
             material_ids=materials_random_order,
-            fields=['structure', 'symmetry', 'material_id', 'formula_pretty']
+            fields=['structure', 'symmetry',
+                    'material_id', 'formula_pretty', 'chemsys']
         )
 
     crystal_list = [crystal.structure for crystal in crystals]
     space_group_list = [crystal.symmetry.number for crystal in crystals]
+    bravais_list = [str(crystal.symmetry.symbol)[0] for crystal in crystals]
     system_list = [str(crystal.symmetry.crystal_system)
                    for crystal in crystals]
     material_id_list = [(crystal.material_id, crystal.formula_pretty)
                         for crystal in crystals]
 
-    return crystal_list, space_group_list, system_list, material_id_list
+    return (
+        crystal_list,
+        space_group_list,
+        bravais_list,
+        system_list,
+        material_id_list
+    )
+
+
+def retrieve_crystals_from_api(api_key: str, crystal_system: str, base_dir: str, write: bool = False, **kwargs) -> tuple:
+    """
+    Retrieves ALL mp-ids that correspond to the crystal system.
+
+    Args:
+        api_key (str): API key.
+        crystal_system (str): Crystal system of interest.
+        base_dir (str): Base directory for the project.
+        write (bool): If True, all the ids are written to mp-ids/crystal_system.
+        **kwargs: Additional keyword arguments.
+            min_size (int): Limit the number of samples to min_size * len(unique(bravais lattices)).
+
+    Returns:
+        tuple:
+            bravais_dict: Dictionary with keys as Bravais lattice types and values as corresponding mp-ids.
+            least_datapoints: Least number of datapoints of all the values in the dictionary.
+            api_key: API key.
+    """
+
+    bravais_dict = {
+        'P': [],  # primitive
+        'I': [],  # body centered
+        'A': [],  # face centered
+        'F': [],  # centered on A
+        'C': [],  # centered on C
+        'R': [],  # rhombohedral
+    }
+
+    conversion_dict = {
+        'P': ['Primitive'],
+        'I': ['Body Centered'],
+        'A': ['Face Centered'],
+        'F': ['Centered on A'],
+        'C': ['Centered on C'],
+        'R': ['Rhombohedral']
+    }
+
+    with MPRester(api_key=api_key) as mpr:
+        crystals = mpr.materials.search(
+            elements=["Si", "O"],
+            crystal_system=[crystal_system.capitalize()],
+            fields=['material_id', 'symmetry']
+        )
+
+    for crystal in crystals:
+        bravais_dict[str(crystal.symmetry.symbol)[0]
+                     ].append(crystal.material_id)
+
+    non_empty_keys = [key for key in list(
+        bravais_dict.keys()) if len(bravais_dict[key]) > 0]
+
+    sizes = []
+
+    if write:
+        new_folder = os.path.join(base_dir, "mp_ids")
+
+        if not os.path.exists(new_folder):
+            os.makedirs(new_folder)
+
+        file_dir = os.path.join(new_folder, crystal_system+".txt")
+        file = open(file_dir, 'w')
+
+        for non_empty_key in non_empty_keys:
+            length_space_group = len(bravais_dict[non_empty_key])
+            sizes.append(length_space_group)
+            file.write(f"~{non_empty_key}-{length_space_group}\n")
+
+            for value in list(bravais_dict[non_empty_key]):
+                file.write(f"{value}\n")
+        file.close()
+
+    bravais_dict = {k: v for k, v in bravais_dict.items() if k in non_empty_keys}
+
+    print(f"_________________Summary:{crystal_system} System_________________\n")
+    for bravais in non_empty_keys:
+        print(f"{bravais}: {conversion_dict[bravais][0]}")
+    
+    for x in bravais_dict.keys():
+        sizes.append(len(bravais_dict[x]))    
+    
+    for x, y in zip(non_empty_keys, sizes):
+        print(f">> {x}: number of datapoints - {y}")
+    
+    least_datapoints = min(sizes)
+    print(f"\n>> Total number of samples: {sum(sizes)}\n")
+    print(f"\n>> Smallest number of sample points: {least_datapoints}")
+
+    if 'min_size' in kwargs:
+        min_size = kwargs['min_size']
+        print(f">> Overwriting least number of available sample points from {least_datapoints} to {min_size}")
+        return (
+                bravais_dict, 
+                min_size, 
+                api_key
+                )
+    else:
+        return (
+                bravais_dict, 
+                least_datapoints, 
+                api_key
+                )
+
+
+def get_crystal_info(retrieve_crystals_tuple) -> tuple:
+    """
+    Retrieves crystal structure properties, crystal system classifications, 
+    and material IDs from a dictionary of mp-ids
+
+    Args:
+        tuple:
+            bravais_dict (dict): See above documentation.
+            min_size (int): See above documentation.
+            api_key (str): See above documentation.
+
+    Returns:
+        crystal_list (list): A list of crystal structures.
+        space_group_list (list): A list of spacegroup numbers.
+        bravais_list (list): A list of Bravais Lattice types, which can be one of the following:
+                'Simple (P)', 'Body centered (I)', 'Face centered (F)'
+        system_list (list): A list of crystal system classifications, which can be one of the following:
+                'Triclinic', 'Trigonal', 'Orthorhombic', 'Cubic', 'Monoclinic', 'Tetragonal', 'Hexagonal'.
+        material_id_list (list): A list of tuples, where each tuple contains a material ID and its formula, e.g., [(id_1, formula_1), ... , (id_n, formula_n)].
+    """
+    bravais_dict, min_size, api_key = retrieve_crystals_tuple
+    crystal_list, space_group_list, bravais_list, system_list, material_id_list = [], [], [], [], []
+
+    for k in bravais_dict.keys():
+        shuffled_array = np.array(bravais_dict[k])
+        np.random.shuffle(shuffled_array)
+        shuffle_list = shuffled_array.tolist()
+
+        with MPRester(api_key=api_key) as mpr:
+            crystals = mpr.materials.search(
+                material_ids=shuffle_list[:min_size],
+                fields=['structure', 'symmetry',
+                        'material_id', 'formula_pretty', 'chemsys']
+            )
+
+        crystal_list += [crystal.structure for crystal in crystals]
+        space_group_list += [crystal.symmetry.number for crystal in crystals]
+        bravais_list += [str(crystal.symmetry.symbol)[0]
+                         for crystal in crystals]
+        system_list += [str(crystal.symmetry.crystal_system)
+                        for crystal in crystals]
+        material_id_list += [(crystal.material_id, crystal.formula_pretty)
+                             for crystal in crystals]
+    print(f">> Samples per bravais lattice type: {min_size}")
+    print(f">> Total samples: {min_size * len(bravais_dict.keys())}")
+    return (
+        crystal_list,
+        space_group_list,
+        bravais_list,
+        system_list,
+        material_id_list
+    )
 
 
 def get_cartesian_beam_directions(upper: int = 1) -> list:
@@ -130,7 +298,8 @@ def plot_patterns(dfs: list, beam_directions: list, system_list: list, material_
     count = 0
     l = 3
     fig, ax = plt.subplots(nrows=l, ncols=l, figsize=(5 * l, 5 * l))
-    fig.suptitle(f"{material_id} {system_list} \n Electron Diffraction Pattern")
+    fig.suptitle(f"{material_id} \
+                 {system_list} \n Electron Diffraction Pattern")
 
     for i in range(l):
         for j in range(l):
@@ -180,6 +349,7 @@ def get_dp_from_beam_direction(beam_direction: tuple[float, float, float], my_cr
                      intensity. Includes columns for position (x, y), intensity, magnitude, and angle.
     """
 
+    # voltage for HT8700 CFE: 80 kV
     my_tem = TEMCalculator(beam_direction=beam_direction, voltage=80)
     df = my_tem.get_pattern(SpacegroupAnalyzer(
         my_crystal_structure).get_conventional_standard_structure())
@@ -231,31 +401,36 @@ def write_data_to_txt(filename: str, data: list) -> None:
             f.write(f"vector((0,0,0),{str(d)})\n")
 
 
-def get_preprocessed_data(crystal_list: list, space_group_list: list, system_list: list, material_id_list: list,
-                          beam_directions: list, plot: bool = False, vectors: bool = True) -> list:
+def get_preprocessed_data(get_crystal_returns: tuple, beam_directions: list, plot: bool = False, vectors: bool = True) -> list:
     """
     Preprocesses crystal data, generates features and labels, and optionally plots diffraction patterns.
 
     Args:
-        crystal_list (list): A list of crystal structures.
-        space_group_list (list): A list of space group numbers.
-        system_list (list): A list of crystal system classifications.
-        material_id_list (list): A list of tuples containing material IDs and formulas.
+        tuple:
+            crystal_list (list): A list of crystal structures.
+            space_group_list (list): A list of space group numbers.
+            bravais_list (list): A list of bravais lattice types.
+            system_list (list): A list of crystal system classifications.
+            material_id_list (list): A list of tuples containing material IDs and formulas.
         beam_directions (list): A list of beam direction vectors.
         plot (bool, optional): Whether to plot diffraction patterns. Defaults to False.
         vectors (bool, optional): Whether to use vectors for features. Defaults to True.
 
     Returns:
-
-        features (list): A list of feature vectors for each crystal.
-        labels_regression (list): A list of unit cell parameters for regression.
-        labels_classification_space (list): A list of crystal system space groups.
-        labels_classification_system (list): A list of crystal system classifications.
-        material_id_list (list): A list of tuples containing material IDs and formulas.
+        tuple:
+            features (list): A list of feature vectors for each crystal.
+            labels_regression (list): A list of unit cell parameters for regression.
+            labels_classification_space (list): A list of crystal system space groups.
+            labels_classification_bravais (list): A list of bravais lattice types.
+            labels_classification_system (list): A list of crystal system classifications.
+            material_id_list (list): A list of tuples containing material IDs and formulas.
     """
+
+    crystal_list, space_group_list, bravais_list, system_list, material_id_list = get_crystal_returns
     features = []
     labels_regression = []
     labels_classification_space = space_group_list
+    labels_classification_bravais = bravais_list
     labels_classification_system = system_list
     times = []
     base_time = time.time()
@@ -270,12 +445,12 @@ def get_preprocessed_data(crystal_list: list, space_group_list: list, system_lis
             end_time = time.time()
             print(f"_________________{i*100//length}% complete_________________")
             time_diff = end_time - start_time
-            print(f"Time elapsed: {round(end_time - base_time, 3)} s")
-            print(f"Time diff: {round(time_diff, 3)} s")
+            print(f">> Time elapsed: {round(end_time - base_time, 3)} s")
+            print(f">> Time diff: {round(time_diff, 3)} s")
             times.append(time_diff)
             start_time = time.time()
 
-            print(f"{i}: {material_id_list[i]} ")
+            print(f">> {i}: {material_id_list[i]} ")
 
         parameters = [round(struct[unit_parameter], 2) for unit_parameter in [
             'a', 'b', 'c', 'alpha', 'beta', 'gamma']]
@@ -302,23 +477,31 @@ def get_preprocessed_data(crystal_list: list, space_group_list: list, system_lis
                           labels_classification_system[i], material_id_list[i])
 
     print("___________________________________")
-    print(f"Time elapsed: {round(time.time() - base_time, 3)} s")
-    print("100% complete")
+    print(f">> Time elapsed: {round(time.time() - base_time, 3)} s")
+    print(">> 100% complete")
     print("______________________________________________________________________")
 
-    return features, labels_regression, labels_classification_space, labels_classification_system, material_id_list
+    return (
+        features,
+        labels_regression,
+        labels_classification_space,
+        labels_classification_bravais,
+        labels_classification_system,
+        material_id_list
+    )
 
 
-def save_data(features, labels_regression, labels_classification_space, labels_classification_system, material_ids, base_dir, new_dir) -> str:
+def save_data(get_preprocessed_returns, base_dir, new_dir) -> str:
     """
-    Saves processed features, labels and material ids from previous code modules
+    Saves the returns from get_preprocessed_data , labels and material ids from previous code modules
 
     Args:
-        features (list): list of features.
-        labels_regression (list): unit cell parameters [a,b,c,alpha,beta,gamma].
-        labels_classification_space
-        labels_classification_system (list): crystal system group.
-        materials_ids (list): material ids.
+        tuple:
+            features (list): list of features.
+            labels_regression (list): unit cell parameters [a,b,c,alpha,beta,gamma].
+            labels_classification_space
+            labels_classification_system (list): crystal system group.
+            materials_ids (list): material ids.
         base_dir (str): base directory of repo.
         new_dir (str): where the saved data should go.
 
@@ -326,19 +509,30 @@ def save_data(features, labels_regression, labels_classification_space, labels_c
         str: a key path that contains the paths of all the saved files.
 
     """
-    l = [features, labels_regression, labels_classification_space,
-         labels_classification_system, material_ids]
+    features, labels_regression, labels_classification_space, labels_classification_bravais, labels_classification_system, material_id_list = get_preprocessed_returns
+
+    print(f">> Printing the first element from each array\n")
+    for x in get_preprocessed_returns:
+        print(x[0:3])
+
+    inp = input("<< Would you like to save your data? [y]/[n]")
+    if inp != 'y':
+        return print(">> No files saved. \n>> Interrupting preprocessing.")
+
+    l = [features, labels_regression, labels_classification_space, labels_classification_bravais,
+         labels_classification_system, material_id_list]
 
     new_folder = os.path.join(base_dir, 'preprocessed_data', f"{new_dir}")
     if not os.path.exists(new_folder):
         os.makedirs(new_folder)
 
-    length = len(material_ids)
+    length = len(material_id_list)
 
     filenames = [
         os.path.join(new_folder, f"{new_dir}_features_{length}.joblib"),
         os.path.join(new_folder, f"{new_dir}_regression_{length}.joblib"),
         os.path.join(new_folder, f"{new_dir}_labels_classification_space_{length}.joblib"),
+        os.path.join(new_folder, f"{new_dir}_labels_classification_bravais_{length}.joblib"),
         os.path.join(new_folder, f"{new_dir}_labels_classification_system_{length}.joblib"),
         os.path.join(new_folder, f"{new_dir}_material_ids{length}.joblib")
     ]
@@ -348,8 +542,7 @@ def save_data(features, labels_regression, labels_classification_space, labels_c
 
     dump(filenames, f"{new_dir}_key_path")
 
-    print(filenames)
-    print("Path to retrieve files: {}".format(
+    print(">> All files saved to: {}".format(
         os.path.abspath(f"{new_dir}_key_path")))
 
     return os.path.abspath(f"{new_dir}_key_path")
@@ -370,6 +563,6 @@ def load_data(filenames_path) -> list:
     data_list = []
 
     for filename in get_file_names:
-        print(f"Retrieving: {filename}")
+        print(f">> Retrieving: {filename}")
         data_list.append(load(filename))
     return data_list
