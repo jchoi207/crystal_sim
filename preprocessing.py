@@ -99,7 +99,7 @@ def retrieve_crystals_from_api(api_key: str, crystal_system: str, base_dir: str,
 
     with MPRester(api_key=api_key) as mpr:
         crystals = mpr.materials.search(
-            elements=["Si", "O"],
+            # elements=["Si", "O"], # for testing only
             crystal_system=[crystal_system.capitalize()],
             fields=['material_id', 'symmetry']
         )
@@ -505,6 +505,22 @@ def get_preprocessed_data(get_crystal_returns: tuple, beam_directions: list, plo
         material_id_list
     )
 
+def sanity_check(list: list, i: int = 1) -> None:
+    """
+    Given a list of data, print the first i elements of each.
+    
+    Args:
+        list (list): List of lists.
+        i (int): Number of elements to be displayed
+        
+    Returns: 
+        None
+    """
+    print(f">> Sanity Check: printing element(s) {i} of {len(list[0])} from each array\n")
+    
+    for x in list:
+        print(x[0:i])
+    
 
 def save_data(get_preprocessed_returns, base_dir, new_dir) -> str:
     """
@@ -525,10 +541,8 @@ def save_data(get_preprocessed_returns, base_dir, new_dir) -> str:
 
     """
     features, labels_regression, labels_classification_space, labels_classification_bravais, labels_classification_system, material_id_list = get_preprocessed_returns
-
-    print(f">> Sanity Check: printing the first element from each array\n")
-    for x in get_preprocessed_returns:
-        print(x[0:1])
+    
+    sanity_check(get_preprocessed_returns, 1)
 
     inp = input("<< Would you like to save your data? [y]/[n]")
     if inp != 'y':
@@ -555,29 +569,35 @@ def save_data(get_preprocessed_returns, base_dir, new_dir) -> str:
     for i in range(len(l)):
         dump(l[i], filenames[i])
 
-    dump(filenames, f"{new_dir}_key_path")
+
 
     print(">> All files saved to: {}".format(
-        os.path.abspath(f"{new_dir}_key_path")))
+        new_folder))
 
-    return os.path.abspath(f"{new_dir}_key_path")
+    return new_folder
 
 
-def load_data(filenames_path) -> list:
+def load_data(directory) -> list:
     """
     Loads the data that was saved using the save_data() function.
 
     Args:
-        filenames_path (str): path returned by save_data.
+        directory (str): Base directory of the projec 
 
     Returns:
-        list: List containing all the loaded information.
+        data_list (list): List of loaded data.
     """
-
-    get_file_names = load(filenames_path)
+    
     data_list = []
-
-    for filename in get_file_names:
-        print(f">> Retrieving: {filename}")
-        data_list.append(load(filename))
+    for filename in os.listdir(directory):
+        file_path = os.path.join(directory, filename)
+        if file_path.endswith('.joblib'):
+            data_list.append(load(file_path))
+            print(f">> Retrieving: {filename}")
+    
+    try:
+        sanity_check(data_list, 1)
+    except IndexError as e:
+        print(f">> There are no files at {directory}")
+    
     return data_list
