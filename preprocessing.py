@@ -100,6 +100,7 @@ def retrieve_crystals_from_api(api_key: str, crystal_system: str, base_dir: str,
     with MPRester(api_key=api_key) as mpr:
         crystals = mpr.materials.search(
             # elements=["Si", "O"], # for testing only
+            spacegroup_number = 225,
             crystal_system=[crystal_system.capitalize()],
             fields=['material_id', 'symmetry']
         )
