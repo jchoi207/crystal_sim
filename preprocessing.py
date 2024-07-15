@@ -96,14 +96,27 @@ def retrieve_crystals_from_api(api_key: str, crystal_system: str, base_dir: str,
         'C': ['Centered on C'],
         'R': ['Rhombohedral ']
     }
-
-    with MPRester(api_key=api_key) as mpr:
-        crystals = mpr.materials.search(
-            # elements=["Si", "O"], # for testing only
-            spacegroup_number = 225,
-            crystal_system=[crystal_system.capitalize()],
-            fields=['material_id', 'symmetry']
-        )
+    if kwargs['space_group'] != None:
+        try:
+            space_group = int(kwargs['space_group']) # single out spacegroup_number
+            
+            if (space_group < 0) or (space_group > 230):
+                raise ValueError(">> space_group must be between 1 and 230 inclusive.")
+        except ValueError as e:
+            print(e)
+        
+        with MPRester(api_key=api_key) as mpr:
+            crystals = mpr.materials.search(
+                spacegroup_number=space_group,
+                crystal_system=[crystal_system.capitalize()],
+                fields=['material_id', 'symmetry']
+            )
+    else:
+        with MPRester(api_key=api_key) as mpr:
+            crystals = mpr.materials.search(
+                crystal_system=[crystal_system.capitalize()],
+                fields=['material_id', 'symmetry']
+            )
 
     for crystal in crystals:
         bravais_dict[str(crystal.symmetry.symbol)[0]
@@ -160,8 +173,7 @@ def retrieve_crystals_from_api(api_key: str, crystal_system: str, base_dir: str,
         min_size = least_datapoints + 1
         while min_size > least_datapoints:
             try:
-
-                min_size = int(input(f"<< How many crystals per Bravais Lattice type would you like to process? \nThis number must necessarily be <= {least_datapoints} to ensure a balanced dataset"))
+                min_size = int(input(f"<< How many crystals per Bravais Lattice type would you like to process? \nThis number must be <= {least_datapoints} to ensure a balanced dataset"))
                 if min_size > least_datapoints:
                     print(f">> Invalid input. Enter a number <= {least_datapoints}")
             except ValueError:
@@ -297,7 +309,7 @@ def get_rounded_position(data: list, position: bool) -> list:
         return round_decimal(data)
 
 
-def plot_patterns(dfs: list, beam_directions: list, system_list: list, material_id: str) -> None:
+def plot_patterns(dfs: list, beam_directions: list, system_list: list, material_id: str, space_group: int, bravais_type: str) -> None:
     """
     Plots diffraction patterns and vectors from the center of the beam to the five closest spots for each pattern.
 
@@ -310,8 +322,7 @@ def plot_patterns(dfs: list, beam_directions: list, system_list: list, material_
     count = 0
     l = 3
     fig, ax = plt.subplots(nrows=l, ncols=l, figsize=(5 * l, 5 * l))
-    fig.suptitle(f"{material_id} \
-                 {system_list} \n Electron Diffraction Pattern")
+    fig.suptitle(f"Electron Diffraction Pattern \n{material_id[0]}, {system_list}, S.G: {space_group}, Brav: {bravais_type}")
 
     for i in range(l):
         for j in range(l):
@@ -489,12 +500,17 @@ def get_preprocessed_data(get_crystal_returns: tuple, beam_directions: list, plo
         features.append(features_i)
 
         if vectors and plot:
-            plot_patterns(dfs, beam_directions,
-                          labels_classification_system[i], material_id_list[i])
+            plot_patterns(dfs, 
+                          beam_directions,
+                          labels_classification_system[i], 
+                          material_id_list[i],
+                          labels_classification_space[i],
+                          labels_classification_bravais[i]
+                          )
 
-    print("___________________________________")
+    print(f"_________________100% complete_________________")
+    print(f">> No. of crystals preprocessed: {len(material_id_list)}")
     print(f">> Total time elapsed: {round(time.time() - base_time, 3)} s")
-    print(">> 100% complete")
     print("______________________________________________________________________\n")
 
     return (
@@ -520,7 +536,7 @@ def sanity_check(list: list, i: int = 1) -> None:
     print(f">> Sanity Check: printing element(s) {i} of {len(list[0])} from each array\n")
     
     for x in list:
-        print(x[0:i])
+        print(f">> {x[0:i]}")
     
 
 def save_data(get_preprocessed_returns, base_dir, new_dir) -> str:
@@ -547,8 +563,10 @@ def save_data(get_preprocessed_returns, base_dir, new_dir) -> str:
 
     inp = input("<< Would you like to save your data? [y]/[n]")
     if inp != 'y':
-        return print(">> No files saved. \n>> Interrupting preprocessing.")
-
+        inp = input("<< Asking one more time, would you like to save your data? [y]/[n]")
+        if inp != 'y':
+            return print(">> No files saved. \n>> Interrupting preprocessing.")
+        
     l = [features, labels_regression, labels_classification_space, labels_classification_bravais,
          labels_classification_system, material_id_list]
 
@@ -572,7 +590,7 @@ def save_data(get_preprocessed_returns, base_dir, new_dir) -> str:
 
 
 
-    print(">> All files saved to: {}".format(
+    print("\n>> All files saved to: {}".format(
         new_folder))
 
     return new_folder
